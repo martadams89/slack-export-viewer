@@ -52,6 +52,7 @@ services:
     volumes:
       - slack_data:/data
     environment:
+      AUTH_ENABLED: "false"
       UPLOADER_BIND: "0.0.0.0"
       UPLOADER_PORT: "8080"
       UPLOADER_TARGET: "/data/export.zip"

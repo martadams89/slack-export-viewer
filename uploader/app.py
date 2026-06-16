@@ -13,10 +13,10 @@ app = Flask(__name__)
 
 UPLOAD_HTML = """
 <!doctype html>
-<html lang=\"en\">
+<html lang="en">
 <head>
-  <meta charset=\"utf-8\" />
-  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Slack Archive Upload</title>
   <style>
     :root {
@@ -87,15 +87,15 @@ UPLOAD_HTML = """
   </style>
 </head>
 <body>
-  <main class=\"card\">
+  <main class="card">
     <h1>Slack Export Archive Upload</h1>
     <p>Upload your Slack export zip file. It will be stored in persistent Docker volume storage and used by the viewer service.</p>
 
     {% if message %}
-    <div class=\"status {{ 'ok' if message_type == 'ok' else 'warn' }}\">{{ message }}</div>
+    <div class="status {{ 'ok' if message_type == 'ok' else 'warn' }}">{{ message }}</div>
     {% endif %}
 
-    <div class=\"status {{ 'ok' if archive_exists else 'warn' }}\">
+    <div class="status {{ 'ok' if archive_exists else 'warn' }}">
       {% if archive_exists %}
       Archive is present at <code>{{ archive_path }}</code><br/>
       Size: {{ archive_size }} bytes<br/>
@@ -105,12 +105,24 @@ UPLOAD_HTML = """
       {% endif %}
     </div>
 
-    <form class=\"row\" method=\"post\" enctype=\"multipart/form-data\" action=\"{{ url_for('upload') }}\">
-      <input type=\"file\" name=\"archive\" accept=\".zip\" required />
-      <button type=\"submit\">Upload Archive</button>
+    <div class="status {{ 'ok' if auth_enabled else 'warn' }}">
+      Authentication:
+      {% if auth_enabled %}
+      Enabled
+      {% else %}
+      Disabled
+      {% endif %}
+    </div>
+
+    <form class="row" method="post" enctype="multipart/form-data" action="{{ url_for('upload') }}">
+      <input type="file" name="archive" accept=".zip" required />
+      <button type="submit">Upload Archive</button>
     </form>
 
-    <p class=\"hint row\">Viewer URL (authenticated): <a href=\"{{ url_for('viewer_proxy_root') }}\" target=\"_blank\" rel=\"noreferrer\">{{ url_for('viewer_proxy_root') }}</a></p>
+    <p class="hint row">
+      Viewer URL {% if auth_enabled %}(authenticated){% else %}(no authentication){% endif %}:
+      <a href="{{ url_for('viewer_proxy_root') }}" target="_blank" rel="noreferrer">{{ url_for('viewer_proxy_root') }}</a>
+    </p>
   </main>
 </body>
 </html>
@@ -124,6 +136,10 @@ def _required_env(name: str) -> str:
     return value
 
 
+def _auth_enabled() -> bool:
+    return os.getenv("AUTH_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _get_target_path() -> Path:
     target = os.getenv("UPLOADER_TARGET", "/data/export.zip").strip() or "/data/export.zip"
     return Path(target)
@@ -134,7 +150,9 @@ def _viewer_base_url() -> str:
 
 
 def check_auth(username: str, password: str) -> bool:
-    return username == _required_env("UPLOADER_USERNAME") and password == _required_env("UPLOADER_PASSWORD")
+    expected_username = os.getenv("UPLOADER_USERNAME", "").strip()
+    expected_password = os.getenv("UPLOADER_PASSWORD", "").strip()
+    return username == expected_username and password == expected_password
 
 
 def authenticate() -> Response:
@@ -148,9 +166,13 @@ def authenticate() -> Response:
 def requires_auth(func):
     @wraps(func)
     def decorated(*args, **kwargs):
+        if not _auth_enabled():
+            return func(*args, **kwargs)
+
         auth = request.authorization
         if not auth or not check_auth(auth.username or "", auth.password or ""):
             return authenticate()
+
         return func(*args, **kwargs)
 
     return decorated
@@ -179,6 +201,7 @@ def index():
         archive_size=size,
         archive_mtime=mtime,
         archive_path=str(target),
+        auth_enabled=_auth_enabled(),
     )
 
 
@@ -267,6 +290,12 @@ def viewer_proxy(subpath: str):
 @requires_auth
 def viewer_proxy_root():
     return viewer_proxy("")
+
+
+# Validate auth-related env vars at startup only if auth is enabled
+if _auth_enabled():
+    _required_env("UPLOADER_USERNAME")
+    _required_env("UPLOADER_PASSWORD")
 
 
 if __name__ == "__main__":
