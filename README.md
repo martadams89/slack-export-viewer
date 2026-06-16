@@ -73,6 +73,8 @@ Default uploader credentials are defined in `docker-compose.yml`:
 
 Change these before exposing this outside localhost.
 
+> Credentials can be disabled with `AUTH_ENABLED=false` in the uploader service environment.
+
 PowerShell quick start:
 
 ```powershell
