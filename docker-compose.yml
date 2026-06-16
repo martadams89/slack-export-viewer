@@ -14,7 +14,7 @@ services:
     #   context: .
     #   dockerfile: Dockerfile
     # --- OR pull from a registry once you've pushed the image:
-    image: martadams89/slack-export-viewer:latest
+    image: ghcr.io/martadams89/slack-export-viewer:latest
     container_name: slack-export-viewer
     restart: unless-stopped
     volumes:
@@ -44,7 +44,7 @@ services:
     #   context: ./uploader
     #   dockerfile: Dockerfile
     # --- OR pull from a registry once you've pushed the image:
-    image: martadams89/slack-archive-uploader:latest
+    image: ghcr.io/martadams89/slack-archive-uploader:latest
     container_name: slack-archive-uploader
     restart: unless-stopped
     ports:
