@@ -10,11 +10,11 @@
 
 services:
   slack-export-viewer:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     # --- OR pull from a registry once you've pushed the image:
-    # image: your-registry/slack-export-viewer:4.0.0
+    image: martadams89/slack-export-viewer:latest
     container_name: slack-export-viewer
     restart: unless-stopped
     volumes:
@@ -40,9 +40,11 @@ services:
       start_period: 15s
 
   archive-uploader:
-    build:
-      context: ./uploader
-      dockerfile: Dockerfile
+    # build:
+    #   context: ./uploader
+    #   dockerfile: Dockerfile
+    # --- OR pull from a registry once you've pushed the image:
+    image: martadams89/slack-archive-uploader:latest
     container_name: slack-archive-uploader
     restart: unless-stopped
     ports:
