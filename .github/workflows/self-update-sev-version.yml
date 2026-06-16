@@ -1,0 +1,65 @@
+name: Self Update Slack Export Viewer Version
+
+on:
+  schedule:
+    - cron: "23 2 * * 1"
+  workflow_dispatch:
+
+jobs:
+  update-version:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get current and latest package versions
+        id: versions
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          current_version=$(grep -oP 'slack-export-viewer==\K[^" ]+' Dockerfile)
+          latest_version=$(python - <<'PY'
+          import json
+          import urllib.request
+
+          with urllib.request.urlopen('https://pypi.org/pypi/slack-export-viewer/json', timeout=30) as resp:
+              data = json.load(resp)
+
+          print(data['info']['version'])
+          PY
+          )
+
+          echo "current=$current_version" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest_version" >> "$GITHUB_OUTPUT"
+
+      - name: Update Dockerfile pin
+        if: steps.versions.outputs.current != steps.versions.outputs.latest
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i "s/slack-export-viewer==${{ steps.versions.outputs.current }}/slack-export-viewer==${{ steps.versions.outputs.latest }}/" Dockerfile
+
+      - name: Create pull request
+        if: steps.versions.outputs.current != steps.versions.outputs.latest
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/update-sev-version
+          delete-branch: true
+          commit-message: "chore: bump slack-export-viewer to ${{ steps.versions.outputs.latest }}"
+          title: "chore: bump slack-export-viewer to ${{ steps.versions.outputs.latest }}"
+          body: |
+            Automated update of the pinned slack-export-viewer version in Dockerfile.
+
+            - Current: ${{ steps.versions.outputs.current }}
+            - Latest:  ${{ steps.versions.outputs.latest }}
+
+            This PR was created by the self-update workflow.
+
+      - name: No update needed
+        if: steps.versions.outputs.current == steps.versions.outputs.latest
+        run: echo "Already on latest version (${{ steps.versions.outputs.current }})"

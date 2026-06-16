@@ -1,0 +1,122 @@
+name: GHCR Cleanup
+
+on:
+  schedule:
+    - cron: "17 3 * * 0"
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    env:
+      IMAGE_NAME: slack-export-viewer
+      KEEP_LATEST_TAGGED: "10"
+      UNTAGGED_MAX_AGE_DAYS: "7"
+
+    steps:
+      - name: Prune old GHCR package versions
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const packageName = process.env.IMAGE_NAME;
+            const keepTagged = Number(process.env.KEEP_LATEST_TAGGED || '10');
+            const untaggedMaxAgeDays = Number(process.env.UNTAGGED_MAX_AGE_DAYS || '7');
+            const cutoffMs = Date.now() - (untaggedMaxAgeDays * 24 * 60 * 60 * 1000);
+
+            async function listVersions(ownerType) {
+              if (ownerType === 'user') {
+                return github.paginate(
+                  github.rest.packages.getAllPackageVersionsForPackageOwnedByUser,
+                  {
+                    package_type: 'container',
+                    package_name: packageName,
+                    username: owner,
+                    per_page: 100
+                  }
+                );
+              }
+
+              return github.paginate(
+                github.rest.packages.getAllPackageVersionsForPackageOwnedByOrg,
+                {
+                  package_type: 'container',
+                  package_name: packageName,
+                  org: owner,
+                  per_page: 100
+                }
+              );
+            }
+
+            async function deleteVersion(ownerType, id) {
+              if (ownerType === 'user') {
+                return github.rest.packages.deletePackageVersionForUser({
+                  package_type: 'container',
+                  package_name: packageName,
+                  username: owner,
+                  package_version_id: id
+                });
+              }
+
+              return github.rest.packages.deletePackageVersionForOrg({
+                package_type: 'container',
+                package_name: packageName,
+                org: owner,
+                package_version_id: id
+              });
+            }
+
+            let ownerType = 'user';
+            let versions;
+
+            try {
+              versions = await listVersions('user');
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+              ownerType = 'org';
+              versions = await listVersions('org');
+            }
+
+            const tagged = [];
+            const untagged = [];
+
+            for (const version of versions) {
+              const tags = version.metadata?.container?.tags || [];
+              if (tags.length > 0) {
+                tagged.push(version);
+              } else {
+                untagged.push(version);
+              }
+            }
+
+            tagged.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+            const deletions = [];
+
+            const oldTagged = tagged.slice(keepTagged);
+            for (const version of oldTagged) {
+              deletions.push({ id: version.id, reason: 'tagged-over-limit' });
+            }
+
+            for (const version of untagged) {
+              const created = new Date(version.created_at).getTime();
+              if (created < cutoffMs) {
+                deletions.push({ id: version.id, reason: 'untagged-old' });
+              }
+            }
+
+            core.info(`Found ${versions.length} total versions for ${packageName}`);
+            core.info(`Keeping latest ${Math.min(keepTagged, tagged.length)} tagged versions`);
+            core.info(`Deleting ${deletions.length} versions`);
+
+            for (const target of deletions) {
+              await deleteVersion(ownerType, target.id);
+              core.info(`Deleted version ${target.id} (${target.reason})`);
+            }

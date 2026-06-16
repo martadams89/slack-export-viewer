@@ -1,0 +1,61 @@
+# docker-compose.yml – local development / single-server deployment
+#
+# Usage:
+#   1. Place your Slack export zip at ./data/export.zip  (or change SEV_ARCHIVE)
+#   2. docker compose up --build
+#   3. Browse to http://localhost:5000
+#
+# To use a pre-extracted directory instead of a zip, set:
+#   SEV_ARCHIVE=/data/my-export-dir
+
+services:
+  slack-export-viewer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # --- OR pull from a registry once you've pushed the image:
+    # image: your-registry/slack-export-viewer:4.0.0
+    container_name: slack-export-viewer
+    restart: unless-stopped
+    volumes:
+      # Persistent data volume shared with uploader
+      - slack_data:/data
+    environment:
+      SEV_IP: "0.0.0.0"
+      SEV_PORT: "5000"
+      SEV_ARCHIVE: "/data/export.zip"
+      SEV_NO_BROWSER: "true"
+      # Uncomment / add any other SEV_* options as needed:
+      # SEV_SHOW_DMS: "true"
+      # SEV_CHANNELS: "general,random"
+      # SEV_HIDE_CHANNELS: "alerts"
+      # SEV_SKIP_CHANNEL_MEMBER_CHANGE: "true"
+      # SEV_NO_SIDEBAR: "false"
+    command: ["sh", "-c", "until [ -f \"$${SEV_ARCHIVE}\" ]; do echo \"Waiting for archive at $${SEV_ARCHIVE}\"; sleep 5; done; exec slack-export-viewer"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  archive-uploader:
+    build:
+      context: ./uploader
+      dockerfile: Dockerfile
+    container_name: slack-archive-uploader
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - slack_data:/data
+    environment:
+      UPLOADER_BIND: "0.0.0.0"
+      UPLOADER_PORT: "8080"
+      UPLOADER_TARGET: "/data/export.zip"
+      UPLOADER_USERNAME: "admin"
+      UPLOADER_PASSWORD: "change-me-now"
+      VIEWER_BASE_URL: "http://slack-export-viewer:5000"
+
+volumes:
+  slack_data:

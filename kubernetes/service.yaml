@@ -1,0 +1,46 @@
+# kubernetes/service.yaml
+# ClusterIP exposes the app inside the cluster.
+# Change type to LoadBalancer (or add an Ingress below) to expose externally.
+apiVersion: v1
+kind: Service
+metadata:
+  name: slack-export-viewer
+  namespace: slack-viewer
+spec:
+  selector:
+    app: slack-export-viewer
+  ports:
+    - name: http
+      port: 80
+      targetPort: 5000
+  type: ClusterIP   # change to LoadBalancer for a quick public IP, or use Ingress
+
+---
+# kubernetes/ingress.yaml (optional – remove if not needed)
+# Example Nginx ingress. Adapt host and TLS to your cluster.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: slack-export-viewer
+  namespace: slack-viewer
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    # Uncomment to enable HTTPS via cert-manager:
+    # cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: slack-viewer.example.com    # ← change to your domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: slack-export-viewer
+                port:
+                  number: 80
+  # tls:
+  #   - hosts:
+  #       - slack-viewer.example.com
+  #     secretName: slack-viewer-tls

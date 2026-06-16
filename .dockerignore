@@ -1,0 +1,15 @@
+# Ignore everything that doesn't belong in the image
+**/__pycache__
+**/*.pyc
+**/*.pyo
+*.egg-info/
+.git/
+.gitignore
+.env
+.env.*
+data/
+*.zip
+*.tar.gz
+kubernetes/
+README.md
+docker-compose*.yml

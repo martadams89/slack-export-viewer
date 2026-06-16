@@ -1,0 +1,20 @@
+# kubernetes/pvc.yaml
+# PersistentVolumeClaim to hold the Slack export archive.
+# On AKS use the "azurefile" or "azurefile-csi" storage class (pre-provisioned).
+# On other clusters substitute the storageClassName that fits your environment.
+#
+# To populate the PVC:
+#   kubectl cp ./data/export.zip slack-viewer/<pod-name>:/data/export.zip
+#   (or use an init container / external CI step to seed the volume)
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: slack-export-pvc
+  namespace: slack-viewer
+spec:
+  accessModes:
+    - ReadWriteOnce        # change to ReadWriteMany if you need multi-replica
+  storageClassName: ""     # set to "azurefile-csi" on AKS, "standard" on GKE, etc.
+  resources:
+    requests:
+      storage: 2Gi         # adjust to the size of your export archive

@@ -1,0 +1,62 @@
+# kubernetes/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: slack-export-viewer
+  namespace: slack-viewer
+  labels:
+    app: slack-export-viewer
+spec:
+  replicas: 1          # Flask dev server is single-threaded; keep 1 replica
+  selector:
+    matchLabels:
+      app: slack-export-viewer
+  template:
+    metadata:
+      labels:
+        app: slack-export-viewer
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: slack-export-viewer
+          # Replace with your registry/image once pushed:
+          image: your-registry/slack-export-viewer:4.0.0
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 5000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: slack-viewer-config
+          volumeMounts:
+            - name: export-data
+              mountPath: /data
+              readOnly: true
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 5000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+      volumes:
+        - name: export-data
+          persistentVolumeClaim:
+            claimName: slack-export-pvc
