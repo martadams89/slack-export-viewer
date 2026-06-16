@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  update-version:
+  update-viewer-version:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -63,3 +63,70 @@ jobs:
       - name: No update needed
         if: steps.versions.outputs.current == steps.versions.outputs.latest
         run: echo "Already on latest version (${{ steps.versions.outputs.current }})"
+
+  update-uploader-deps:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-tools
+        run: pip install pip-tools
+
+      - name: Check for outdated uploader dependencies
+        id: deps
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cd uploader
+          cp requirements.txt requirements.txt.orig
+
+          # Resolve latest compatible versions from unpinned package names
+          sed 's/==.*//' requirements.txt > requirements.in
+          pip-compile --no-header --strip-extras -o requirements.txt.new requirements.in
+
+          # Keep only the package==version lines (drop comments/blank lines for comparison)
+          grep -E '^[a-zA-Z]' requirements.txt.orig | sort > /tmp/old.txt
+          grep -E '^[a-zA-Z]' requirements.txt.new  | sort > /tmp/new.txt
+
+          if diff -q /tmp/old.txt /tmp/new.txt > /dev/null 2>&1; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            cp requirements.txt.new requirements.txt
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "diff<<EOF" >> "$GITHUB_OUTPUT"
+            diff /tmp/old.txt /tmp/new.txt >> "$GITHUB_OUTPUT" || true
+            echo "EOF" >> "$GITHUB_OUTPUT"
+          fi
+          rm -f requirements.txt.orig requirements.txt.new requirements.in
+
+      - name: Create pull request
+        if: steps.deps.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/update-uploader-deps
+          delete-branch: true
+          commit-message: "chore: update uploader pip dependencies"
+          title: "chore: update uploader pip dependencies"
+          body: |
+            Automated update of pinned pip dependencies in `uploader/requirements.txt`.
+
+            ```diff
+            ${{ steps.deps.outputs.diff }}
+            ```
+
+            This PR was created by the self-update workflow.
+
+      - name: No update needed
+        if: steps.deps.outputs.changed == 'false'
+        run: echo "Uploader dependencies are already up to date"

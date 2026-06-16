@@ -12,8 +12,14 @@ jobs:
       packages: write
       contents: read
 
+    strategy:
+      matrix:
+        image:
+          - slack-export-viewer
+          - slack-archive-uploader
+
     env:
-      IMAGE_NAME: slack-export-viewer
+      IMAGE_NAME: ${{ matrix.image }}
       KEEP_LATEST_TAGGED: "10"
       UNTAGGED_MAX_AGE_DAYS: "7"
 
