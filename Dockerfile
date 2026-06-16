@@ -2,7 +2,7 @@
 # Slack Export Viewer – Container Image
 # Source: https://github.com/hfaran/slack-export-viewer
 # ──────────────────────────────────────────────────────────────────────────────
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 LABEL org.opencontainers.image.title="slack-export-viewer" \
       org.opencontainers.image.description="Slack Export archive web viewer" \
