@@ -129,6 +129,67 @@ UPLOAD_HTML = """
 """
 
 
+VIEWER_WAITING_HTML = """
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Viewer Initializing</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Segoe UI, Tahoma, sans-serif;
+            background: #f5f7fb;
+            color: #1f2937;
+            min-height: 100vh;
+            display: grid;
+            place-items: center;
+            padding: 16px;
+        }
+        .card {
+            width: min(720px, 100%);
+            background: #fff;
+            border: 1px solid #d0d5dd;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 10px 28px rgba(16, 24, 40, 0.08);
+        }
+        h1 { margin-top: 0; }
+        p { color: #475467; }
+        .ok { color: #067647; }
+        .warn { color: #b54708; }
+        code { background: #f2f4f7; padding: 1px 5px; border-radius: 4px; }
+        .actions { margin-top: 14px; }
+        a { color: #127ea6; }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <h1>Viewer is not ready yet</h1>
+        <p>{{ reason }}</p>
+
+        <p class="{{ 'ok' if archive_exists else 'warn' }}">
+            {% if archive_exists %}
+            Archive found at <code>{{ archive_path }}</code> ({{ archive_size }} bytes, updated {{ archive_mtime }}).<br/>
+            The viewer container may still be starting or restarting.
+            {% else %}
+            No archive found at <code>{{ archive_path }}</code>.<br/>
+            Upload one from the root page first.
+            {% endif %}
+        </p>
+
+        <div class="actions">
+            <a href="/">Go to uploader</a>
+            &nbsp;|&nbsp;
+            <a href="/viewer">Retry viewer</a>
+        </div>
+    </main>
+</body>
+</html>
+"""
+
+
 def _required_env(name: str) -> str:
     value = os.getenv(name, "").strip()
     if not value:
@@ -147,6 +208,68 @@ def _get_target_path() -> Path:
 
 def _viewer_base_url() -> str:
     return os.getenv("VIEWER_BASE_URL", "http://slack-export-viewer:5000").rstrip("/") + "/"
+
+
+def _restart_on_upload_enabled() -> bool:
+    return os.getenv("RESTART_ON_UPLOAD", "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _kube_namespace() -> str:
+    explicit = os.getenv("KUBE_RESTART_NAMESPACE", "").strip()
+    if explicit:
+        return explicit
+
+    ns_file = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
+    if ns_file.exists():
+        return ns_file.read_text(encoding="utf-8").strip()
+    return "default"
+
+
+def trigger_viewer_rollout_restart() -> tuple[bool, str]:
+    deployment = os.getenv("KUBE_RESTART_DEPLOYMENT", "").strip()
+    if not deployment:
+        return False, "KUBE_RESTART_DEPLOYMENT not set"
+
+    token_path = Path("/var/run/secrets/kubernetes.io/serviceaccount/token")
+    ca_path = Path("/var/run/secrets/kubernetes.io/serviceaccount/ca.crt")
+    if not token_path.exists() or not ca_path.exists():
+        return False, "service account token/CA not mounted"
+
+    namespace = _kube_namespace()
+    api_server = os.getenv("KUBERNETES_SERVICE_HOST", "kubernetes.default.svc")
+    api_port = os.getenv("KUBERNETES_SERVICE_PORT_HTTPS", "443")
+    url = f"https://{api_server}:{api_port}/apis/apps/v1/namespaces/{namespace}/deployments/{deployment}"
+
+    token = token_path.read_text(encoding="utf-8").strip()
+    now = datetime.now(timezone.utc).isoformat()
+    patch = {
+        "spec": {
+            "template": {
+                "metadata": {
+                    "annotations": {
+                        "slack-export-viewer/restarted-at": now
+                    }
+                }
+            }
+        }
+    }
+
+    try:
+        response = requests.patch(
+            url,
+            json=patch,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/merge-patch+json",
+            },
+            verify=str(ca_path),
+            timeout=8,
+        )
+        if 200 <= response.status_code < 300:
+            return True, f"viewer restart triggered at {now}"
+        return False, f"kube API returned {response.status_code}: {response.text[:200]}"
+    except Exception as exc:
+        return False, f"kube API call failed: {exc}"
 
 
 def check_auth(username: str, password: str) -> bool:
@@ -222,7 +345,17 @@ def upload():
     file.save(temp_path)
     temp_path.replace(target)
 
-    return redirect(url_for("index", message="Archive uploaded successfully", type="ok"))
+    message = "Archive uploaded successfully"
+    level = "ok"
+    if _restart_on_upload_enabled():
+        restarted, detail = trigger_viewer_rollout_restart()
+        if restarted:
+            message = f"{message}. {detail}"
+        else:
+            message = f"{message}. Viewer restart failed: {detail}"
+            level = "warn"
+
+    return redirect(url_for("index", message=message, type=level))
 
 
 _ROOT_URL_RE = re.compile(
@@ -259,15 +392,32 @@ def viewer_proxy(subpath: str):
     inbound_headers["X-Forwarded-For"] = request.remote_addr or ""
     inbound_headers["X-Forwarded-Proto"] = request.scheme
 
-    proxied = requests.request(
-        method=request.method,
-        url=target_url,
-        data=request.get_data(),
-        headers=inbound_headers,
-        cookies=request.cookies,
-        allow_redirects=False,
-        timeout=120,
-    )
+    try:
+        proxied = requests.request(
+            method=request.method,
+            url=target_url,
+            data=request.get_data(),
+            headers=inbound_headers,
+            cookies=request.cookies,
+            allow_redirects=False,
+            timeout=120,
+        )
+    except requests.RequestException:
+        target = _get_target_path()
+        exists, size, mtime = archive_metadata(target)
+        reason = (
+            "The viewer backend is currently unavailable. "
+            "If you just uploaded an archive, wait a few seconds and retry."
+        )
+        body = render_template_string(
+            VIEWER_WAITING_HTML,
+            reason=reason,
+            archive_exists=exists,
+            archive_size=size,
+            archive_mtime=mtime,
+            archive_path=str(target),
+        )
+        return Response(body, status=200, mimetype="text/html")
 
     excluded = {"content-encoding", "content-length", "transfer-encoding", "connection"}
     resp_headers = [(k, v) for k, v in proxied.headers.items() if k.lower() not in excluded]
