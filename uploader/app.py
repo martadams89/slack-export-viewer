@@ -137,6 +137,9 @@ VIEWER_WAITING_HTML = """
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Viewer Initializing</title>
+    {% if archive_exists %}
+    <meta http-equiv="refresh" content="8;url=/viewer" />
+    {% endif %}
     <style>
         body {
             margin: 0;
@@ -163,17 +166,31 @@ VIEWER_WAITING_HTML = """
         code { background: #f2f4f7; padding: 1px 5px; border-radius: 4px; }
         .actions { margin-top: 14px; }
         a { color: #127ea6; }
+        .spinner {
+            display: inline-block;
+            width: 14px; height: 14px;
+            border: 2px solid #d0d5dd;
+            border-top-color: #127ea6;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            vertical-align: middle;
+            margin-right: 6px;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <main class="card">
-        <h1>Viewer is not ready yet</h1>
+        <h1>
+            {% if archive_exists %}<span class="spinner"></span>{% endif %}
+            Viewer is not ready yet
+        </h1>
         <p>{{ reason }}</p>
 
         <p class="{{ 'ok' if archive_exists else 'warn' }}">
             {% if archive_exists %}
             Archive found at <code>{{ archive_path }}</code> ({{ archive_size }} bytes, updated {{ archive_mtime }}).<br/>
-            The viewer container may still be starting or restarting.
+            The viewer is starting — this page will refresh automatically.
             {% else %}
             No archive found at <code>{{ archive_path }}</code>.<br/>
             Upload one from the root page first.
@@ -183,7 +200,7 @@ VIEWER_WAITING_HTML = """
         <div class="actions">
             <a href="/">Go to uploader</a>
             &nbsp;|&nbsp;
-            <a href="/viewer">Retry viewer</a>
+            <a href="/viewer">Retry now</a>
         </div>
     </main>
 </body>
@@ -377,17 +394,17 @@ def upload():
 
     temp_path.replace(target)
 
-    message = f"Archive uploaded successfully. {validation_message}."
+    message = f"Archive uploaded and validated successfully ({temp_path.stat().st_size if False else target.stat().st_size} bytes)."
     level = "ok"
     if _restart_on_upload_enabled():
         restarted, detail = trigger_viewer_rollout_restart()
         if restarted:
-            message = f"{message}. {detail}"
+            message = f"{message} Viewer is restarting — visit /viewer in ~15 seconds."
         else:
-            message = f"{message}. Viewer restart failed: {detail}"
+            message = f"{message} Warning: viewer restart failed: {detail}. Restart the viewer pod manually."
             level = "warn"
     else:
-        message = f"{message} Viewer restart is disabled; restart the viewer manually if it is already running."
+        message = f"{message} RESTART_ON_UPLOAD is disabled — restart the viewer pod manually to load the new archive."
 
     return redirect(url_for("index", message=message, type=level))
 
