@@ -1,5 +1,6 @@
 import os
 import re
+import zipfile
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
@@ -309,6 +310,31 @@ def archive_metadata(path: Path):
     return True, stat.st_size, mtime
 
 
+def validate_slack_archive(path: Path) -> tuple[bool, str]:
+    if not path.exists() or path.stat().st_size == 0:
+        return False, "Uploaded file is empty"
+
+    try:
+        with zipfile.ZipFile(path, "r") as archive:
+            bad_member = archive.testzip()
+            if bad_member:
+                return False, f"Archive is corrupt near member: {bad_member}"
+
+            file_members = [name for name in archive.namelist() if not name.endswith("/")]
+    except zipfile.BadZipFile:
+        return False, "File is not a valid zip archive"
+    except Exception as exc:
+        return False, f"Could not validate archive: {exc}"
+
+    basenames = {Path(member).name for member in file_members}
+    required_files = {"channels.json", "users.json"}
+    missing = sorted(required_files - basenames)
+    if missing:
+        return False, f"Missing required Slack export files: {', '.join(missing)}"
+
+    return True, "Archive validation passed"
+
+
 @app.get("/")
 @requires_auth
 def index():
@@ -341,11 +367,17 @@ def upload():
         return redirect(url_for("index", message="Only .zip files are allowed", type="warn"))
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    temp_path = target.with_suffix(".tmp")
+    temp_path = target.with_suffix(".uploading.tmp")
     file.save(temp_path)
+
+    valid, validation_message = validate_slack_archive(temp_path)
+    if not valid:
+        temp_path.unlink(missing_ok=True)
+        return redirect(url_for("index", message=f"Upload rejected: {validation_message}", type="warn"))
+
     temp_path.replace(target)
 
-    message = "Archive uploaded successfully"
+    message = f"Archive uploaded successfully. {validation_message}."
     level = "ok"
     if _restart_on_upload_enabled():
         restarted, detail = trigger_viewer_rollout_restart()
@@ -354,6 +386,8 @@ def upload():
         else:
             message = f"{message}. Viewer restart failed: {detail}"
             level = "warn"
+    else:
+        message = f"{message} Viewer restart is disabled; restart the viewer manually if it is already running."
 
     return redirect(url_for("index", message=message, type=level))
 

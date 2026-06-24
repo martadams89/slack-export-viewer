@@ -62,8 +62,11 @@ The compose stack now includes an upload service with HTTP basic auth:
 Behavior:
 
 - Archive uploads are stored in a persistent named volume (`slack_data`) at `/data/export.zip`
+- Uploaded archives are validated before replace (zip integrity + required `channels.json` and `users.json`)
+- Invalid uploads are rejected and the previous working archive remains in place
 - The viewer waits until `/data/export.zip` exists, then starts
 - Viewer traffic is proxied through the authenticated uploader service at `/viewer`
+- If `RESTART_ON_UPLOAD=true` in Kubernetes, uploader triggers a deployment rollout restart so new data is picked up
 - Restarting containers keeps uploaded data because it is in the named volume
 
 Default uploader credentials are defined in `docker-compose.yml`:
@@ -124,6 +127,16 @@ All options are set via environment variables in `docker-compose.yml`:
 | `SEV_SINCE` | _(none)_ | Only show messages after `YYYY-MM-DD` |
 
 Full list: `docker run --rm slack-export-viewer:4.0.0 slack-export-viewer --help`
+
+Uploader-specific environment variables:
+
+| Env var | Default | Description |
+|---|---|---|
+| `UPLOADER_TARGET` | `/data/export.zip` | Upload destination file path |
+| `VIEWER_BASE_URL` | `http://slack-export-viewer:5000` | URL used by uploader reverse-proxy for `/viewer` |
+| `RESTART_ON_UPLOAD` | `false` | When `true`, call Kubernetes API to rollout-restart the viewer deployment |
+| `KUBE_RESTART_DEPLOYMENT` | _(unset)_ | Deployment name to restart when `RESTART_ON_UPLOAD=true` |
+| `KUBE_RESTART_NAMESPACE` | _(pod namespace)_ | Namespace for restart call (auto-detected in cluster) |
 
 ---
 
