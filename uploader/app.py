@@ -487,7 +487,7 @@ def viewer_proxy(subpath: str):
     return Response(body, status=proxied.status_code, headers=resp_headers)
 
 
-@app.get("/viewer/")
+@app.route("/viewer/", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"])
 @requires_auth
 def viewer_proxy_root():
     return viewer_proxy("")
