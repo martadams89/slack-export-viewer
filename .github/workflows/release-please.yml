@@ -1,0 +1,34 @@
+name: Release Please
+on:
+  # Run on every push to main. release-please maintains a release PR; when that
+  # PR is merged (another push to main) it cuts the GitHub release + "v*" tag,
+  # which in turn triggers container-publish.yml's tag-triggered build.
+  push:
+    branches:
+      - "main"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: rp
+        with:
+          release-type: simple
+          # The default GITHUB_TOKEN never triggers CI on the PRs it opens,
+          # so the release PR's required checks would never run.
+          token: ${{ secrets.RENOVATE_TOKEN }}
+
+      - name: Enable auto-merge on the release PR
+        if: ${{ steps.rp.outputs.prs_created == 'true' && steps.rp.outputs.pr }}
+        env:
+          GH_TOKEN: ${{ secrets.RENOVATE_TOKEN }}
+        run: gh pr merge --auto --squash "${{ fromJSON(steps.rp.outputs.pr).number }}" --repo "${{ github.repository }}" || true
