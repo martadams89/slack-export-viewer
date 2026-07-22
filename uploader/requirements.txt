@@ -2,7 +2,7 @@ blinker==1.9.0
     # via
     #   -r requirements.in
     #   flask
-certifi==2026.6.17
+certifi==2026.7.22
     # via
     #   -r requirements.in
     #   requests
