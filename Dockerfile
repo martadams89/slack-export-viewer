@@ -15,7 +15,7 @@ RUN groupadd --gid 1001 appgroup && \
 WORKDIR /app
 
 # Install the package from PyPI (pinned to the current stable release)
-RUN pip install --no-cache-dir "slack-export-viewer==4.0.0"
+RUN pip install --no-cache-dir "slack-export-viewer==4.0.1"
 
 # The Slack export archive (.zip or extracted directory) is mounted here at runtime
 VOLUME ["/data"]
